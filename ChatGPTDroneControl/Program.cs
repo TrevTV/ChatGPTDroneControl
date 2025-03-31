@@ -1,13 +1,14 @@
 ﻿using DJIControlClient;
+using OpenAI.Assistants;
 using OpenAI.Responses;
 
 namespace ChatGPTDroneControl;
 
 internal static class Program
 {
-    private const string SYSTEM = @"You are controlling a drone. I want it to take some scenic pictures around the location.
+    private const string SYSTEM = @"You are controlling a drone. I want it to simply roam around the environment.
 
-You may stack multiple changes at once, however keep execution order in mind.
+You may stack multiple changes at once, however keep execution order in mind. Only one will be executed at once.
 
 For each movement change, you will receive a photo of your current position, as well as position information.
 
@@ -15,11 +16,13 @@ Provide a one-sentence reasoning for the given command(s).
 
 You will always start in an idle state, you must take off before you can move the drone.
 
+Try to turn the drone and using forward, rather than just banking in a given direction. It gives you more of an idea of what is around you.
+
 The drone is a DJI Mini SE, which is quite small and gives you room for movement.
 
 Be careful to avoid obstacles, such as trees and buildings.
 
-Always check weather information before taking off to ensure safe conditions. It will be included in the first user message, no need to request it. Be very strict, you want fully dry and very calm wind.";
+Always check weather information before taking off to ensure safe conditions. It will be included in the first user message, no need to request it.";
 
     public static HttpClient HttpClient { get; } = new();
     public static Drone DroneClient { get; } = new(Configuration.File.APIs.DroneIPPort);
@@ -30,13 +33,8 @@ Always check weather information before taking off to ensure safe conditions. It
 
     private static async Task<ResponseItem> GetDroneInfoResponseItem()
     {
-        if (_firstMove)
-        {
-            _firstMove = false;
-            return ResponseItem.CreateUserMessageItem(await GPTTools.GetWeatherInfo());
-        }
-
         await DroneClient.CaptureShot();
+        await Task.Delay(1200);
         string encodedImg = await DroneClient.GetMediaPreview(0);
         byte[] imgData = Convert.FromBase64String(encodedImg);
 
@@ -46,8 +44,11 @@ Always check weather information before taking off to ensure safe conditions. It
         try { alt = await DroneClient.GetAltitude(); } catch { }
         float heading = await DroneClient.GetHeading();
 
+        string weather = _firstMove ? "\n\nWeather Info:\n" + await GPTTools.GetWeatherInfo() : "";
+        _firstMove = false;
+
         ResponseContentPart statePart = ResponseContentPart.CreateInputTextPart($@"Altitude: {alt}
-Heading: {heading}");
+Heading: {heading}{weather}");
 
         return ResponseItem.CreateUserMessageItem([statePart, imgPart]);
     }
