@@ -564,7 +564,6 @@ namespace DJIControlClient
         /// </summary>
         /// <param name="index">Index of media file</param>
         /// <returns>Base64 encoded string of preview image</returns>
-        // TODO: Check returned format
         public async Task<string> GetMediaPreview(int index)
         {
             CommandCompleted<string> result = await Call<string>($"fetchPreviewFromIndex/{index}");

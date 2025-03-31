@@ -2,6 +2,7 @@
 using OpenAI.Chat;
 using OpenAI.Responses;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace ChatGPTDroneControl;
@@ -22,25 +23,264 @@ public static class GPTTools
                 "properties": {},
                 "required": []
             }
-            """u8.ToArray())
-        )
+            """u8.ToArray())),
+        ResponseTool.CreateFunctionTool(
+            functionName: nameof(Takeoff),
+            functionDescription: "Turns on the drone rotors and sends it up a few meters.",
+            BinaryData.FromBytes("""
+            {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+            """u8.ToArray())),
+        ResponseTool.CreateFunctionTool(
+            functionName: nameof(Land),
+            functionDescription: "Tells the drone to descend, before turning off the rotors. Only use when above a very flat and open area.",
+            BinaryData.FromBytes("""
+            {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+            """u8.ToArray())),
+        ResponseTool.CreateFunctionTool(
+            functionName: nameof(GetWeatherInfo),
+            functionDescription: "Get the weather info for the location of the drone.",
+            BinaryData.FromBytes("""
+            {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+            """u8.ToArray())),
+        ResponseTool.CreateFunctionTool(
+            functionName: nameof(MoveDirection),
+            functionDescription: "Moves the drone in the given direction. Returns when the planned flight paths is entirely traversed.",
+            BinaryData.FromBytes("""
+            {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["Forward", "Backward", "Left", "Right", "Up", "Down"],
+                        "description": "The direction for the drone to move in."
+                    },
+                    "distance": {
+                        "type": "number",
+                        "description": "The distance to move, in meters."
+                    }
+                },
+                "required": ["direction", "distance"],
+                "additionalProperties": false
+            }
+            """u8.ToArray()),
+            functionSchemaIsStrict: true),
+        ResponseTool.CreateFunctionTool(
+            functionName: nameof(TurnDirection),
+            functionDescription: "Turns the drone in the given direction. Returns when the planned flight paths is entirely traversed.",
+            BinaryData.FromBytes("""
+            {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["Clockwise", "CounterClockwise"],
+                        "description": "The direction for the drone to turn."
+                    },
+                    "angle": {
+                        "type": "number",
+                        "description": "The angle to turn, in degrees."
+                    }
+                },
+                "required": ["direction", "angle"],
+                "additionalProperties": false
+            }
+            """u8.ToArray()),
+            functionSchemaIsStrict: true),
+        ResponseTool.CreateFunctionTool(
+            functionName: nameof(SetCameraPitch),
+            functionDescription: "Sets the camera's vertical rotation.",
+            BinaryData.FromBytes("""
+            {
+                "type": "object",
+                "properties": {
+                    "angle": {
+                        "type": "number",
+                        "description": "The angle to turn, in degrees. 90 is straight down. 0 is pointing forwards. 0-90 is the valid range."
+                    }
+                },
+                "required": ["angle"],
+                "additionalProperties": false
+            }
+            """u8.ToArray()),
+            functionSchemaIsStrict: true),
     };
 
     public static async Task<FunctionCallOutputResponseItem> HandleFunctionCall(FunctionCallResponseItem toolCall)
     {
-        string toolOutput = "success";
-
-        toolOutput = toolCall.FunctionName switch
+        string toolOutput = toolCall.FunctionName switch
         {
             nameof(GetWeatherInfo) => await GetWeatherInfo(),
+            nameof(Takeoff) => await Takeoff(),
+            nameof(Land) => await Land(),
+            nameof(MoveDirection) => await MoveDirection(toolCall),
+            nameof(TurnDirection) => await TurnDirection(toolCall),
+            nameof(SetCameraPitch) => await SetCameraPitch(toolCall),
             _ => throw new NotImplementedException(),
         };
         return ResponseItem.CreateFunctionCallOutputItem(toolCall.CallId, toolOutput);
     }
 
-    #region Weather
+    #region Drone - Takeoff + Landing
 
-    public static readonly ResponseTool GetWeatherInfoTool = 
+    private static async Task<string> Takeoff()
+    {
+        await _drone.Takeoff();
+        return "success";
+    }
+
+    private static async Task<string> Land()
+    {
+        await _drone.Land();
+        return "success";
+    }
+
+    #endregion
+
+    #region Drone - SetCameraPitch
+    private static async Task<string> SetCameraPitch(FunctionCallResponseItem toolCall)
+    {
+        using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
+        bool hasAngle = argumentsJson.RootElement.TryGetProperty("angle", out JsonElement rawAngle);
+        if (!hasAngle)
+            throw new ArgumentNullException("angle");
+
+        float angle = 0f;
+
+        if (rawAngle.TryGetDouble(out double dAngle))
+            angle = (float)dAngle;
+        else
+            throw new Exception($"Angle {rawAngle} is not valid");
+
+
+        await _drone.SetGimbalPitch(angle);
+
+        return "success";
+    }
+    #endregion
+
+    #region Drone - TurnDirection
+
+    private enum TurnDir
+    {
+        CounterClockwise,
+        Clockwise
+    }
+
+    private static async Task<string> TurnDirection(FunctionCallResponseItem toolCall)
+    {
+        using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
+        bool hasDirection = argumentsJson.RootElement.TryGetProperty("direction", out JsonElement rawDirection);
+        bool hasAngle = argumentsJson.RootElement.TryGetProperty("angle", out JsonElement rawAngle);
+        if (!hasDirection)
+            throw new ArgumentNullException("direction");
+        if (!hasAngle)
+            throw new ArgumentNullException("angle");
+
+        TurnDir turnDir = TurnDir.Clockwise;
+        float angle = 0f;
+
+        if (Enum.TryParse(typeof(TurnDir), rawDirection.GetString(), false, out object? possibleDir))
+            turnDir = (TurnDir)possibleDir;
+        else
+            throw new Exception($"Direction {rawDirection.GetString()} is not valid");
+
+        if (rawAngle.TryGetDouble(out double dAngle))
+            angle = (float)dAngle;
+        else
+            throw new Exception($"Angle {rawAngle} is not valid");
+
+
+        switch (turnDir)
+        {
+            case TurnDir.Clockwise:
+                await _drone.RotateClockwise(angle);
+                break;
+            case TurnDir.CounterClockwise:
+                await _drone.RotateCounterClockwise(angle);
+                break;
+        }
+
+        return "success";
+    }
+
+    #endregion
+
+    #region Drone - MoveDirection
+
+    private enum Direction
+    {
+        Forward,
+        Backward,
+        Left,
+        Right,
+        Up,
+        Down
+    }
+
+    private static async Task<string> MoveDirection(FunctionCallResponseItem toolCall)
+    {
+        using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
+        bool hasDirection = argumentsJson.RootElement.TryGetProperty("direction", out JsonElement rawDirection);
+        bool hasDistance = argumentsJson.RootElement.TryGetProperty("distance", out JsonElement rawDistance);
+        if (!hasDirection)
+            throw new ArgumentNullException("direction");
+        if (!hasDistance)
+            throw new ArgumentNullException("distance");
+
+        Direction direction = Direction.Up;
+        float distance = 0f;
+
+        if (Enum.TryParse(typeof(Direction), rawDirection.GetString(), false, out object? possibleDir))
+            direction = (Direction)possibleDir;
+        else
+            throw new Exception($"Direction {rawDirection.GetString()} is not valid");
+
+        if (rawDistance.TryGetDouble(out double dDistance))
+            distance = (float)dDistance;
+        else
+            throw new Exception($"Distance {rawDistance} is not valid");
+
+
+        switch (direction)
+        {
+            case Direction.Forward:
+                await _drone.MoveForward(distance);
+                break;
+            case Direction.Backward:
+                await _drone.MoveBackward(distance);
+                break;
+            case Direction.Left:
+                await _drone.MoveLeft(distance);
+                break;
+            case Direction.Right:
+                await _drone.MoveRight(distance);
+                break;
+            case Direction.Up:
+                await _drone.MoveUp(distance);
+                break;
+            case Direction.Down:
+                await _drone.MoveDown(distance);
+                break;
+        }
+
+        return "success";
+    }
+
+    #endregion
+
+    #region Weather
 
     public static async Task<string> GetWeatherInfo()
     {
