@@ -106,7 +106,13 @@ Heading: {heading}{weather}");
                 Console.WriteLine(toolCall.FunctionArguments);
 
                 Console.WriteLine("Is this okay?");
-                Console.ReadKey();
+                string? okay = Console.ReadLine();
+                if (okay != "y" || okay == null)
+                {
+                    okay ??= "No response given";
+                    responseItems.Add(ResponseItem.CreateFunctionCallOutputItem(toolCall.CallId, $"Override by Human Operator: {okay}"));
+                    continue;
+                }
 
                 responseItems.Add(await GPTTools.HandleFunctionCall(toolCall));
             }
