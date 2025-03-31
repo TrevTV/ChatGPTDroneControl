@@ -1,5 +1,4 @@
 ﻿using DJIControlClient;
-using OpenAI.Chat;
 using OpenAI.Responses;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -229,6 +228,7 @@ public static class GPTTools
         Down
     }
 
+    // TODO: maybe we could implement velocity movement? not sure how well it would handle that though.
     private static async Task<string> MoveDirection(FunctionCallResponseItem toolCall)
     {
         using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);

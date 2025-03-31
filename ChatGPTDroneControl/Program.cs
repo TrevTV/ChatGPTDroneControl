@@ -6,28 +6,10 @@ namespace ChatGPTDroneControl;
 
 internal static class Program
 {
-    private const string SYSTEM = @"You are controlling a drone. I want it to simply roam around the environment.
-
-You may stack multiple changes at once, however keep execution order in mind. Only one will be executed at once.
-
-For each movement change, you will receive a photo of your current position, as well as position information.
-
-Provide a one-sentence reasoning for the given command(s).
-
-You will always start in an idle state, you must take off before you can move the drone.
-
-Try to turn the drone and using forward, rather than just banking in a given direction. It gives you more of an idea of what is around you.
-
-The drone is a DJI Mini SE, which is quite small and gives you room for movement.
-
-Be careful to avoid obstacles, such as trees and buildings.
-
-Always check weather information before taking off to ensure safe conditions. It will be included in the first user message, no need to request it.";
-
     public static HttpClient HttpClient { get; } = new();
     public static Drone DroneClient { get; } = new(Configuration.File.APIs.DroneIPPort);
 
-    private static readonly OpenAIResponseClient _aiClient = new("gpt-4o-mini", Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
+    private static OpenAIResponseClient _aiClient;
     private static bool _firstMove = true;
     private static string? previousResponseId = null;
 
@@ -55,12 +37,21 @@ Heading: {heading}{weather}");
 
     public static async Task Main()
     {
+        if (string.IsNullOrWhiteSpace(Configuration.File.APIs.DroneIPPort))
+        {
+            Console.WriteLine("Drone IP:Port is unconfigured. Press any key to exit.");
+            Console.ReadKey();
+            return;
+        }
+
+        _aiClient = new(Configuration.File.Preferences.Model, Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
+
         await DroneClient.SetLandingProtection(false);
         await DroneClient.SetMaxSpeed(1);
 
         ResponseCreationOptions opt = new()
         {
-            Instructions = SYSTEM
+            Instructions = Configuration.File.Preferences.SystemPrompt
         };
 
         foreach (ResponseTool tool in GPTTools.ResponseTools)
@@ -75,10 +66,10 @@ Heading: {heading}{weather}");
             {
                 Console.WriteLine("Waiting for user ready...");
                 Console.ReadLine();
-                Console.WriteLine("Continuing...");
+                Console.WriteLine("Getting current drone information...");
                 responseItems.Clear();
                 responseItems.Add(await GetDroneInfoResponseItem());
-                Console.WriteLine("Drone data updated.");
+                Console.WriteLine("Drone data updated, waiting for AI response...");
             }
 
             if (!string.IsNullOrWhiteSpace(previousResponseId))
@@ -102,10 +93,9 @@ Heading: {heading}{weather}");
                 responseItems.Add(responseItem);
                 toolResponse = true;
 
-                Console.WriteLine(toolCall.FunctionName);
-                Console.WriteLine(toolCall.FunctionArguments);
+                Console.WriteLine(toolCall.FunctionName + $"({toolCall.FunctionArguments})");
 
-                Console.WriteLine("Is this okay?");
+                Console.WriteLine("Is this okay? Respond 'y' for yes, explain why not otherwise to allow the AI to adjust.");
                 string? okay = Console.ReadLine();
                 if (okay != "y" || okay == null)
                 {

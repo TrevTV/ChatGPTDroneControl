@@ -41,6 +41,9 @@ public static class Configuration
 
     public class Config
     {
+        [TomlProperty("preferences")]
+        public Preferences Preferences { get; set; } = new();
+
         [TomlProperty("apis")]
         public APIs APIs { get; set; } = new();
     }
@@ -56,5 +59,31 @@ public static class Configuration
 
         [TomlProperty("drone_ip_port")]
         public string DroneIPPort { get; set; } = "";
+    }
+
+    [TomlDoNotInlineObject]
+    public class Preferences
+    {
+        [TomlProperty("model")]
+        public string Model { get; set; } = "gpt-4o-mini";
+
+        [TomlProperty("system_prompt")]
+        public string SystemPrompt { get; set; } = @"You are controlling a drone. I want it to simply roam around the environment.
+
+You may stack multiple changes at once, however keep execution order in mind. Only one will be executed at once.
+
+After all tool calls are executed, you will receive a photo of your current position, as well as position information.
+
+Provide a one-sentence reasoning for the given command(s).
+
+You will always start in an idle state, you must take off before you can move the drone.
+
+Try to turn the drone and using forward, rather than just banking in a given direction. It gives you more of an idea of what is around you.
+
+The drone is a DJI Mini SE, which is quite small and gives you room for movement.
+
+Be careful to avoid obstacles, such as trees and buildings.
+
+Always check weather information before taking off to ensure safe conditions. It will be included in the first user message, no need to request it.";
     }
 }
